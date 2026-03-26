@@ -24,7 +24,28 @@ type Input struct {
 	} `json:"vim"`
 	ContextWindow struct {
 		RemainingPercentage *float64 `json:"remaining_percentage"`
+		ContextWindowSize   *int     `json:"context_window_size"`
 	} `json:"context_window"`
+	RateLimits struct {
+		FiveHour *struct {
+			UsedPercentage float64 `json:"used_percentage"`
+			ResetsAt       int64   `json:"resets_at"`
+		} `json:"five_hour"`
+		SevenDay *struct {
+			UsedPercentage float64 `json:"used_percentage"`
+			ResetsAt       int64   `json:"resets_at"`
+		} `json:"seven_day"`
+	} `json:"rate_limits"`
+	Agent struct {
+		Name string `json:"name"`
+	} `json:"agent"`
+	Worktree *struct {
+		Name           string `json:"name"`
+		Path           string `json:"path"`
+		Branch         string `json:"branch"`
+		OriginalCwd    string `json:"original_cwd"`
+		OriginalBranch string `json:"original_branch"`
+	} `json:"worktree"`
 }
 
 const (
@@ -34,7 +55,7 @@ const (
 	yellow = "\033[38;5;11m"
 	cyan   = "\033[38;5;14m"
 	gray   = "\033[38;5;244m"
-	reset  = "\033[0m"
+reset  = "\033[0m"
 )
 
 func gitInfo(cwd string) string {
@@ -166,6 +187,49 @@ func parseGitStatus(output string) (staged, unstaged, untracked bool) {
 	return
 }
 
+func formatWindowSize(size int) string {
+	if size >= 1000000 {
+		return fmt.Sprintf("%dM", size/1000000)
+	}
+	return fmt.Sprintf("%dk", size/1000)
+}
+
+func formatRateLimits(input *Input) string {
+	fh := input.RateLimits.FiveHour
+	sd := input.RateLimits.SevenDay
+
+	if fh == nil && sd == nil {
+		return ""
+	}
+
+	var parts []string
+	if fh != nil {
+		parts = append(parts, fmt.Sprintf("%s5h %s%.0f%%%s",
+			gray, gray, fh.UsedPercentage, gray))
+	}
+	if sd != nil {
+		parts = append(parts, fmt.Sprintf("%s7d %s%.0f%%%s",
+			gray, gray, sd.UsedPercentage, gray))
+	}
+
+	return fmt.Sprintf(" · %s(%s%s)%s", gray, strings.Join(parts, gray+", "), gray, reset)
+}
+
+func formatContextWindow(input *Input) string {
+	ctxPct := 0
+	if input.ContextWindow.RemainingPercentage != nil {
+		ctxPct = 100 - int(*input.ContextWindow.RemainingPercentage)
+	}
+
+	s := fmt.Sprintf("ctx %d%%", ctxPct)
+
+	if input.ContextWindow.ContextWindowSize != nil {
+		s += fmt.Sprintf(" %s[%s]%s", gray, formatWindowSize(*input.ContextWindow.ContextWindowSize), reset)
+	}
+
+	return s
+}
+
 func main() {
 	var input Input
 	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
@@ -179,10 +243,6 @@ func main() {
 		model = input.Model.ID
 	}
 	vimMode := input.Vim.Mode
-	ctxPct := 100
-	if input.ContextWindow.RemainingPercentage != nil {
-		ctxPct = int(*input.ContextWindow.RemainingPercentage)
-	}
 
 	sym := "❯"
 	if vimMode == "NORMAL" {
@@ -202,8 +262,19 @@ func main() {
 
 	gitStr := gitInfo(cwd)
 
-	fmt.Printf("%s%s%s%s %s%s %s · ctx %d%%%s\n",
+	// Agent name before model
+	agentStr := ""
+	if input.Agent.Name != "" {
+		agentStr = fmt.Sprintf("%s[%s]%s ", cyan, input.Agent.Name, reset)
+	}
+
+	ctxStr := formatContextWindow(&input)
+	rlStr := formatRateLimits(&input)
+
+	fmt.Printf("%s%s%s%s %s%s %s%s · %s%s%s\n",
 		dirColor, shortDir, reset,
 		gitStr,
-		gray, sym, model, ctxPct, reset)
+		gray, sym,
+		agentStr, model,
+		ctxStr, rlStr, reset)
 }
