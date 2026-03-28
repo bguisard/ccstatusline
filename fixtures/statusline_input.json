@@ -11,7 +11,7 @@
         "project_dir": "/home/user/my-project",
         "added_dirs": []
     },
-    "version": "2.1.71",
+    "version": "2.1.84",
     "output_style": {
         "name": "default"
     },
@@ -36,7 +36,27 @@
         "remaining_percentage": 80
     },
     "exceeds_200k_tokens": false,
+    "rate_limits": {
+        "five_hour": {
+            "used_percentage": 19,
+            "resets_at": 1774548000
+        },
+        "seven_day": {
+            "used_percentage": 39,
+            "resets_at": 1774710000
+        }
+    },
     "vim": {
         "mode": "INSERT"
+    },
+    "agent": {
+        "name": "security-reviewer"
+    },
+    "worktree": {
+        "name": "my-feature",
+        "path": "/home/user/.claude/worktrees/my-feature",
+        "branch": "worktree-my-feature",
+        "original_cwd": "/home/user/my-project",
+        "original_branch": "main"
     }
 }

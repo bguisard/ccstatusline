@@ -260,6 +260,38 @@ func TestParseInputFixture(t *testing.T) {
 	if *input.ContextWindow.RemainingPercentage != 80 {
 		t.Errorf("context_window.remaining_percentage = %v, want %v", *input.ContextWindow.RemainingPercentage, 80.0)
 	}
+
+	// New fields
+	if input.ContextWindow.ContextWindowSize == nil {
+		t.Fatal("context_window.context_window_size is nil")
+	}
+	if *input.ContextWindow.ContextWindowSize != 200000 {
+		t.Errorf("context_window.context_window_size = %v, want %v", *input.ContextWindow.ContextWindowSize, 200000)
+	}
+	if input.RateLimits.FiveHour == nil {
+		t.Fatal("rate_limits.five_hour is nil")
+	}
+	if input.RateLimits.FiveHour.UsedPercentage != 19 {
+		t.Errorf("rate_limits.five_hour.used_percentage = %v, want %v", input.RateLimits.FiveHour.UsedPercentage, 19.0)
+	}
+	if input.RateLimits.SevenDay == nil {
+		t.Fatal("rate_limits.seven_day is nil")
+	}
+	if input.RateLimits.SevenDay.UsedPercentage != 39 {
+		t.Errorf("rate_limits.seven_day.used_percentage = %v, want %v", input.RateLimits.SevenDay.UsedPercentage, 39.0)
+	}
+	if input.Agent.Name != "security-reviewer" {
+		t.Errorf("agent.name = %q, want %q", input.Agent.Name, "security-reviewer")
+	}
+	if input.Worktree == nil {
+		t.Fatal("worktree is nil")
+	}
+	if input.Worktree.Name != "my-feature" {
+		t.Errorf("worktree.name = %q, want %q", input.Worktree.Name, "my-feature")
+	}
+	if input.Worktree.Branch != "worktree-my-feature" {
+		t.Errorf("worktree.branch = %q, want %q", input.Worktree.Branch, "worktree-my-feature")
+	}
 }
 
 func TestParseInputFixtureNoVim(t *testing.T) {
@@ -286,6 +318,307 @@ func TestParseInputFixtureNoVim(t *testing.T) {
 
 	if input.Vim.Mode != "" {
 		t.Errorf("vim.mode = %q, want empty string", input.Vim.Mode)
+	}
+}
+
+func TestFormatWindowSize(t *testing.T) {
+	tests := []struct {
+		name     string
+		size     int
+		expected string
+	}{
+		{"200k", 200000, "200k"},
+		{"128k", 128000, "128k"},
+		{"1M", 1000000, "1M"},
+		{"2M", 2000000, "2M"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatWindowSize(tt.size)
+			if got != tt.expected {
+				t.Errorf("formatWindowSize(%d) = %q, want %q", tt.size, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestFormatContextWindow(t *testing.T) {
+	pct80 := 80.0
+	size200k := 200000
+	size1M := 1000000
+
+	tests := []struct {
+		name     string
+		input    Input
+		expected string
+	}{
+		{
+			name:     "with percentage and 200k window",
+			input:    Input{ContextWindow: struct{ RemainingPercentage *float64 `json:"remaining_percentage"`; ContextWindowSize *int `json:"context_window_size"` }{&pct80, &size200k}},
+			expected: "ctx 20% " + gray + "[200k]" + reset,
+		},
+		{
+			name:     "with percentage and 1M window",
+			input:    Input{ContextWindow: struct{ RemainingPercentage *float64 `json:"remaining_percentage"`; ContextWindowSize *int `json:"context_window_size"` }{&pct80, &size1M}},
+			expected: "ctx 20% " + gray + "[1M]" + reset,
+		},
+		{
+			name:     "with percentage no window size",
+			input:    Input{ContextWindow: struct{ RemainingPercentage *float64 `json:"remaining_percentage"`; ContextWindowSize *int `json:"context_window_size"` }{&pct80, nil}},
+			expected: "ctx 20%",
+		},
+		{
+			name:     "no percentage no window size",
+			input:    Input{},
+			expected: "ctx 0%",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatContextWindow(&tt.input)
+			if got != tt.expected {
+				t.Errorf("formatContextWindow() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestFormatRateLimits(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    Input
+		expected string
+	}{
+		{
+			name:     "both nil",
+			input:    Input{},
+			expected: "",
+		},
+		{
+			name: "both present green",
+			input: func() Input {
+				var i Input
+				i.RateLimits.FiveHour = &struct {
+					UsedPercentage float64 `json:"used_percentage"`
+					ResetsAt       int64   `json:"resets_at"`
+				}{19, 0}
+				i.RateLimits.SevenDay = &struct {
+					UsedPercentage float64 `json:"used_percentage"`
+					ResetsAt       int64   `json:"resets_at"`
+				}{39, 0}
+				return i
+			}(),
+			expected: " · " + gray + "(" + gray + "5h " + gray + "19%" + gray + gray + ", " + gray + "7d " + gray + "39%" + gray + gray + ")" + reset,
+		},
+		{
+			name: "five_hour only",
+			input: func() Input {
+				var i Input
+				i.RateLimits.FiveHour = &struct {
+					UsedPercentage float64 `json:"used_percentage"`
+					ResetsAt       int64   `json:"resets_at"`
+				}{55, 0}
+				return i
+			}(),
+			expected: " · " + gray + "(" + gray + "5h " + gray + "55%" + gray + gray + ")" + reset,
+		},
+		{
+			name: "seven_day only",
+			input: func() Input {
+				var i Input
+				i.RateLimits.SevenDay = &struct {
+					UsedPercentage float64 `json:"used_percentage"`
+					ResetsAt       int64   `json:"resets_at"`
+				}{85, 0}
+				return i
+			}(),
+			expected: " · " + gray + "(" + gray + "7d " + gray + "85%" + gray + gray + ")" + reset,
+		},
+		{
+			name: "boundary 50",
+			input: func() Input {
+				var i Input
+				i.RateLimits.FiveHour = &struct {
+					UsedPercentage float64 `json:"used_percentage"`
+					ResetsAt       int64   `json:"resets_at"`
+				}{50, 0}
+				return i
+			}(),
+			expected: " · " + gray + "(" + gray + "5h " + gray + "50%" + gray + gray + ")" + reset,
+		},
+		{
+			name: "boundary 80",
+			input: func() Input {
+				var i Input
+				i.RateLimits.FiveHour = &struct {
+					UsedPercentage float64 `json:"used_percentage"`
+					ResetsAt       int64   `json:"resets_at"`
+				}{80, 0}
+				return i
+			}(),
+			expected: " · " + gray + "(" + gray + "5h " + gray + "80%" + gray + gray + ")" + reset,
+		},
+		{
+			name: "boundary 81",
+			input: func() Input {
+				var i Input
+				i.RateLimits.FiveHour = &struct {
+					UsedPercentage float64 `json:"used_percentage"`
+					ResetsAt       int64   `json:"resets_at"`
+				}{81, 0}
+				return i
+			}(),
+			expected: " · " + gray + "(" + gray + "5h " + gray + "81%" + gray + gray + ")" + reset,
+		},
+		{
+			name: "boundary 49 green",
+			input: func() Input {
+				var i Input
+				i.RateLimits.FiveHour = &struct {
+					UsedPercentage float64 `json:"used_percentage"`
+					ResetsAt       int64   `json:"resets_at"`
+				}{49, 0}
+				return i
+			}(),
+			expected: " · " + gray + "(" + gray + "5h " + gray + "49%" + gray + gray + ")" + reset,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatRateLimits(&tt.input)
+			if got != tt.expected {
+				t.Errorf("formatRateLimits() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestParseInputAgentPresent(t *testing.T) {
+	data := []byte(`{"agent": {"name": "security-reviewer"}}`)
+	var input Input
+	if err := json.Unmarshal(data, &input); err != nil {
+		t.Fatal(err)
+	}
+	if input.Agent.Name != "security-reviewer" {
+		t.Errorf("agent.name = %q, want %q", input.Agent.Name, "security-reviewer")
+	}
+}
+
+func TestParseInputAgentAbsent(t *testing.T) {
+	data := []byte(`{}`)
+	var input Input
+	if err := json.Unmarshal(data, &input); err != nil {
+		t.Fatal(err)
+	}
+	if input.Agent.Name != "" {
+		t.Errorf("agent.name = %q, want empty", input.Agent.Name)
+	}
+}
+
+func TestParseInputAgentEmpty(t *testing.T) {
+	data := []byte(`{"agent": {"name": ""}}`)
+	var input Input
+	if err := json.Unmarshal(data, &input); err != nil {
+		t.Fatal(err)
+	}
+	if input.Agent.Name != "" {
+		t.Errorf("agent.name = %q, want empty", input.Agent.Name)
+	}
+}
+
+func TestParseInputWorktreePresent(t *testing.T) {
+	data := []byte(`{"worktree": {"name": "my-feature", "path": "/tmp/wt", "branch": "wt-branch", "original_cwd": "/tmp/orig", "original_branch": "main"}}`)
+	var input Input
+	if err := json.Unmarshal(data, &input); err != nil {
+		t.Fatal(err)
+	}
+	if input.Worktree == nil {
+		t.Fatal("worktree is nil")
+	}
+	if input.Worktree.Name != "my-feature" {
+		t.Errorf("worktree.name = %q, want %q", input.Worktree.Name, "my-feature")
+	}
+	if input.Worktree.Path != "/tmp/wt" {
+		t.Errorf("worktree.path = %q, want %q", input.Worktree.Path, "/tmp/wt")
+	}
+	if input.Worktree.Branch != "wt-branch" {
+		t.Errorf("worktree.branch = %q, want %q", input.Worktree.Branch, "wt-branch")
+	}
+	if input.Worktree.OriginalCwd != "/tmp/orig" {
+		t.Errorf("worktree.original_cwd = %q, want %q", input.Worktree.OriginalCwd, "/tmp/orig")
+	}
+	if input.Worktree.OriginalBranch != "main" {
+		t.Errorf("worktree.original_branch = %q, want %q", input.Worktree.OriginalBranch, "main")
+	}
+}
+
+func TestParseInputWorktreeAbsent(t *testing.T) {
+	data := []byte(`{}`)
+	var input Input
+	if err := json.Unmarshal(data, &input); err != nil {
+		t.Fatal(err)
+	}
+	if input.Worktree != nil {
+		t.Errorf("worktree = %+v, want nil", input.Worktree)
+	}
+}
+
+func TestParseInputRateLimitsAbsent(t *testing.T) {
+	data := []byte(`{}`)
+	var input Input
+	if err := json.Unmarshal(data, &input); err != nil {
+		t.Fatal(err)
+	}
+	if input.RateLimits.FiveHour != nil {
+		t.Errorf("rate_limits.five_hour = %+v, want nil", input.RateLimits.FiveHour)
+	}
+	if input.RateLimits.SevenDay != nil {
+		t.Errorf("rate_limits.seven_day = %+v, want nil", input.RateLimits.SevenDay)
+	}
+}
+
+func TestParseInputRateLimitsPartial(t *testing.T) {
+	data := []byte(`{"rate_limits": {"five_hour": {"used_percentage": 42, "resets_at": 100}}}`)
+	var input Input
+	if err := json.Unmarshal(data, &input); err != nil {
+		t.Fatal(err)
+	}
+	if input.RateLimits.FiveHour == nil {
+		t.Fatal("rate_limits.five_hour is nil")
+	}
+	if input.RateLimits.FiveHour.UsedPercentage != 42 {
+		t.Errorf("five_hour.used_percentage = %v, want %v", input.RateLimits.FiveHour.UsedPercentage, 42.0)
+	}
+	if input.RateLimits.SevenDay != nil {
+		t.Errorf("rate_limits.seven_day = %+v, want nil", input.RateLimits.SevenDay)
+	}
+}
+
+func TestParseInputContextWindowSize(t *testing.T) {
+	data := []byte(`{"context_window": {"remaining_percentage": 80, "context_window_size": 200000}}`)
+	var input Input
+	if err := json.Unmarshal(data, &input); err != nil {
+		t.Fatal(err)
+	}
+	if input.ContextWindow.ContextWindowSize == nil {
+		t.Fatal("context_window.context_window_size is nil")
+	}
+	if *input.ContextWindow.ContextWindowSize != 200000 {
+		t.Errorf("context_window.context_window_size = %v, want %v", *input.ContextWindow.ContextWindowSize, 200000)
+	}
+}
+
+func TestParseInputContextWindowSizeAbsent(t *testing.T) {
+	data := []byte(`{"context_window": {"remaining_percentage": 80}}`)
+	var input Input
+	if err := json.Unmarshal(data, &input); err != nil {
+		t.Fatal(err)
+	}
+	if input.ContextWindow.ContextWindowSize != nil {
+		t.Errorf("context_window.context_window_size = %v, want nil", *input.ContextWindow.ContextWindowSize)
 	}
 }
 
